@@ -32,9 +32,16 @@ class DbPageController extends Controller
             return response()->json(["error" => "未提供資料庫 ID"], 400);
         }
 
+        // 確保 URL 正確
         $url = $this->notionDatabasesUrl . $databaseId . "/query";
         $headers = $this->getHeaders();
 
+        // 確保 headers 有 API Key
+        if (!$headers['Authorization']) {
+            return response()->json(["error" => "Notion API Key 未設定"], 400);
+        }
+
+        // 排序條件
         $postData = [
             "sorts" => [
                 [
@@ -44,7 +51,10 @@ class DbPageController extends Controller
             ]
         ];
 
-        $response = Http::withHeaders($headers)->post($url, $postData);
+        // 發送 API 請求
+        $response = Http::withHeaders($headers)
+            ->withBody(json_encode($postData), 'application/json')
+            ->post($url);
 
         return response()->json($response->json(), $response->status());
     }
@@ -101,7 +111,7 @@ class DbPageController extends Controller
             return response()->json(["error" => "未提供資料庫 ID"], 400);
         }
 
-        $title = $request->input('title', '未命名文件');
+        $title = $request->input('title');
         $dueDate = $request->input('due_date');
         $status = $request->input('status');
 
@@ -134,13 +144,16 @@ class DbPageController extends Controller
         $url = $this->notionPagesUrl;
         $headers = $this->getHeaders();
 
-        $response = Http::withHeaders($headers)->post($url, $postData);
+        // $response = Http::withHeaders($headers)->post($url, $postData);
+        $response = Http::withHeaders($headers)
+            ->withBody(json_encode($postData), 'application/json')
+            ->post($url);
 
         return response()->json($response->json(), $response->status());
     }
 
     /**
-     * 刪除指定頁面（設為已歸檔）
+     * 刪除資料庫文件
      */
     public function destroyPage($pageId)
     {
@@ -153,6 +166,52 @@ class DbPageController extends Controller
         $body = ["archived" => true];
 
         $response = Http::withHeaders($headers)->patch($url, $body);
+
+        return response()->json($response->json(), $response->status());
+    }
+
+    /* 更新資料庫文件 */
+    public function updatePage(Request $request, $databaseId, $pageId)
+    {
+        if (empty($databaseId) || empty($pageId)) {
+            return response()->json(["error" => "未提供資料庫 ID 或頁面 ID"], 400);
+        }
+
+        $title = $request->input('title');
+        $dueDate = $request->input('due_date');
+        $status = $request->input('status');
+
+        $updateData = ["properties" => []];
+
+        if ($title) {
+            $updateData["properties"]["Name"] = [
+                "title" => [
+                    [
+                        "type" => "text",
+                        "text" => ["content" => $title]
+                    ]
+                ]
+            ];
+        }
+
+        if ($dueDate) {
+            $updateData["properties"]["Due Date"] = [
+                "date" => ["start" => $dueDate]
+            ];
+        }
+
+        if ($status) {
+            $updateData["properties"]["Status"] = [
+                "status" => ["name" => $status]
+            ];
+        }
+
+        $url = $this->notionPagesUrl . '/' . $pageId;
+        $headers = $this->getHeaders();
+
+        $response = Http::withHeaders($headers)
+            ->withBody(json_encode($updateData), 'application/json')
+            ->patch($url);
 
         return response()->json($response->json(), $response->status());
     }

@@ -2,8 +2,10 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "dev": "vite",
-        "build": "vite build"
+        "build": "vite build",
+        "dev": "php artisan serve",
+        "clear": "php artisan cache:clear && php artisan route:clear && php artisan config:clear && php artisan view:clear"
+
     },
     "devDependencies": {
         "axios": "^1.6.4",
