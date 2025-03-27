@@ -113,7 +113,13 @@ class DbPageController extends Controller
 
         $title = $request->input('title');
         $dueDate = $request->input('due_date');
+        $ticket = $request->input('ticket');
+        $priority = $request->input('priority');
         $status = $request->input('status');
+        $description = $request->input('description');
+        $todoList = $request->input('todo_list');
+
+        $children = [];
 
         $postData = [
             "parent" => ["database_id" => $databaseId],
@@ -129,17 +135,136 @@ class DbPageController extends Controller
             ]
         ];
 
+        // 日期
         if ($dueDate) {
             $postData["properties"]["Due Date"] = [
                 "date" => ["start" => $dueDate]
             ];
         }
 
+        // 優先級
+        if ($priority) {
+            $postData["properties"]["Priority"] = [
+                "select" => ["name" => $priority]
+            ];
+        }
+
+        // 狀態
         if ($status) {
             $postData["properties"]["Status"] = [
                 "status" => ["name" => $status]
             ];
         }
+
+        // 任務單號 
+        if (!empty($ticket)) {
+            $children[] = [
+                "object" => "block",
+                "type" => "toggle",
+                "toggle" => [
+                    "rich_text" => [
+                        [
+                            "type" => "text",
+                            "text" => ["content" => "ticket"]
+                        ]
+                    ],
+                    "children" => [
+                        [
+                            "object" => "block",
+                            "type" => "paragraph",
+                            "paragraph" => [
+                                "rich_text" => [
+                                    [
+                                        "type" => "text",
+                                        "text" => [
+                                            "content" => $ticket
+                                        ],
+                                        "annotations" => [
+                                            "bold" => false,
+                                            "italic" => false,
+                                            "strikethrough" => false,
+                                            "underline" => false,
+                                            "code" => false,
+                                            "color" => "default"
+                                        ]
+                                    ]
+                                ],
+                                "color" => "default"
+                            ]
+                        ]
+                    ]
+                ]
+            ];
+        }
+
+        // 描述
+        if (!empty($description)) {
+            $children[] = [
+                "object" => "block",
+                "type" => "toggle",
+                "toggle" => [
+                    "rich_text" => [
+                        [
+                            "type" => "text",
+                            "text" => ["content" => "description"]
+                        ]
+                    ],
+                    "children" => [
+                        [
+                            "object" => "block",
+                            "type" => "paragraph",
+                            "paragraph" => [
+                                "rich_text" => [
+                                    [
+                                        "type" => "text",
+                                        "text" => [
+                                            "content" => $description
+                                        ],
+                                        "annotations" => [
+                                            "bold" => false,
+                                            "italic" => false,
+                                            "strikethrough" => false,
+                                            "underline" => false,
+                                            "code" => false,
+                                            "color" => "default"
+                                        ]
+                                    ]
+                                ],
+                                "color" => "default"
+                            ]
+                        ]
+                    ]
+                ]
+            ];
+        }
+
+        // 待辦清單
+        if (is_array($todoList)) {
+            foreach ($todoList as $item) {
+                $children[] = [
+                    "object" => "block",
+                    "type" => "to_do",
+                    "to_do" => [
+                        "rich_text" => [
+                            [
+                                "type" => "text",
+                                "text" => [
+                                    "content" => $item["text"] ?? ""
+                                ]
+                            ]
+                        ],
+                        "checked" => $item["checked"] ?? false,
+                        "color" => "default"
+                    ]
+                ];
+            }
+        }
+
+        // ➤ 加入 children 到 postData（若有內容）
+        if (!empty($children)) {
+            $postData["children"] = $children;
+        }
+
 
         $url = $this->notionPagesUrl;
         $headers = $this->getHeaders();
@@ -151,7 +276,6 @@ class DbPageController extends Controller
 
         return response()->json($response->json(), $response->status());
     }
-
     /**
      * 刪除資料庫文件
      */
@@ -180,6 +304,10 @@ class DbPageController extends Controller
         $title = $request->input('title');
         $dueDate = $request->input('due_date');
         $status = $request->input('status');
+        $priority = $request->input('priority');
+        $ticket = $request->input('ticket');
+        $description = $request->input('description');
+        $todoList = $request->input('todo_list');
 
         $updateData = ["properties" => []];
 
@@ -206,12 +334,160 @@ class DbPageController extends Controller
             ];
         }
 
-        $url = $this->notionPagesUrl . '/' . $pageId;
+        if ($priority) {
+            $updateData["properties"]["Priority"] = [
+                "select" => ["name" => $priority]
+            ];
+        }
+
         $headers = $this->getHeaders();
 
+        // 1. 更新 page properties
+        $url = $this->notionPagesUrl . '/' . $pageId;
         $response = Http::withHeaders($headers)
             ->withBody(json_encode($updateData), 'application/json')
             ->patch($url);
+
+        // 2. 刪除舊的 to_do / ticket / description blocks
+        $childrenListUrl = $this->notionBlocksUrl . '/' . $pageId . '/children';
+        $childrenResponse = Http::withHeaders($headers)->get($childrenListUrl);
+        $childrenData = $childrenResponse->json();
+
+        if (isset($childrenData["results"])) {
+            foreach ($childrenData["results"] as $block) {
+                $blockId = $block["id"];
+                $type = $block["type"];
+
+                // 刪除 to_do blocks
+                if ($type === "to_do") {
+                    Http::withHeaders($headers)->delete($this->notionBlocksUrl . '/' . $blockId);
+                }
+
+                // 刪除 toggle blocks 標題為 ticket / description
+                if ($type === "toggle") {
+                    $richText = $block["toggle"]["rich_text"] ?? [];
+
+                    if (!empty($richText) && isset($richText[0]["text"]["content"])) {
+                        $titleText = strtolower($richText[0]["text"]["content"]);
+
+                        if (in_array($titleText, ["ticket", "description"])) {
+                            Http::withHeaders($headers)->delete($this->notionBlocksUrl . '/' . $blockId);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. 準備新的 children blocks
+        $children = [];
+
+        if (!empty($ticket)) {
+            $children[] = [
+                "object" => "block",
+                "type" => "toggle",
+                "toggle" => [
+                    "rich_text" => [
+                        [
+                            "type" => "text",
+                            "text" => ["content" => "ticket"]
+                        ]
+                    ],
+                    "children" => [
+                        [
+                            "object" => "block",
+                            "type" => "paragraph",
+                            "paragraph" => [
+                                "rich_text" => [
+                                    [
+                                        "type" => "text",
+                                        "text" => [
+                                            "content" => $ticket
+                                        ],
+                                        "annotations" => [
+                                            "bold" => false,
+                                            "italic" => false,
+                                            "strikethrough" => false,
+                                            "underline" => false,
+                                            "code" => false,
+                                            "color" => "default"
+                                        ]
+                                    ]
+                                ],
+                                "color" => "default"
+                            ]
+                        ]
+                    ]
+                ]
+            ];
+        }
+
+        if (!empty($description)) {
+            $children[] = [
+                "object" => "block",
+                "type" => "toggle",
+                "toggle" => [
+                    "rich_text" => [
+                        [
+                            "type" => "text",
+                            "text" => ["content" => "description"]
+                        ]
+                    ],
+                    "children" => [
+                        [
+                            "object" => "block",
+                            "type" => "paragraph",
+                            "paragraph" => [
+                                "rich_text" => [
+                                    [
+                                        "type" => "text",
+                                        "text" => [
+                                            "content" => $description
+                                        ],
+                                        "annotations" => [
+                                            "bold" => false,
+                                            "italic" => false,
+                                            "strikethrough" => false,
+                                            "underline" => false,
+                                            "code" => false,
+                                            "color" => "default"
+                                        ]
+                                    ]
+                                ],
+                                "color" => "default"
+                            ]
+                        ]
+                    ]
+                ]
+            ];
+        }
+
+        if (is_array($todoList)) {
+            foreach ($todoList as $item) {
+                $children[] = [
+                    "object" => "block",
+                    "type" => "to_do",
+                    "to_do" => [
+                        "rich_text" => [
+                            [
+                                "type" => "text",
+                                "text" => [
+                                    "content" => $item["text"] ?? ""
+                                ]
+                            ]
+                        ],
+                        "checked" => $item["checked"] ?? false,
+                        "color" => "default"
+                    ]
+                ];
+            }
+        }
+
+        // 4. append 新的 children blocks
+        if (!empty($children)) {
+            Http::withHeaders($headers)
+                ->withBody(json_encode(["children" => $children]), 'application/json')
+                ->patch($childrenListUrl);
+        }
 
         return response()->json($response->json(), $response->status());
     }
